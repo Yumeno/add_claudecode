@@ -1,0 +1,11 @@
+# Per-user Claude Code settings
+.claude/settings.local.json
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp

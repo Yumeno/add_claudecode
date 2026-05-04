@@ -1,0 +1,21 @@
+# Default: normalize line endings on commit, native checkout
+* text=auto
+
+# Shell scripts MUST use LF (CRLF breaks shebang and heredoc parsing)
+*.sh text eol=lf
+
+# PowerShell scripts work best with CRLF on Windows
+*.ps1 text eol=crlf
+
+# Markdown / config — let git decide
+*.md   text
+*.toml text
+*.yml  text
+*.yaml text
+*.json text
+
+# Treat as binary
+*.png binary
+*.jpg binary
+*.gif binary
+*.zip binary
