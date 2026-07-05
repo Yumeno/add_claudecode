@@ -10,11 +10,19 @@
 
 set -uo pipefail
 
-ARGS="${1:-}"
-if [[ -z "$ARGS" ]]; then
-    echo "Error: argument string is required (pass user's prompt as the single argument)." >&2
-    exit 1
-fi
+ARGS=""
+MODE="auto"
+FILES=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --prompt) ARGS="${2:?--prompt requires a value}"; shift 2 ;;
+        --mode) MODE="${2:?--mode requires a value}"; shift 2 ;;
+        --file) FILES+=("${2:?--file requires a value}"); shift 2 ;;
+        --) shift; break ;;
+        *) if [[ -z "$ARGS" ]]; then ARGS="$1"; shift; else echo "Error: unknown argument: $1" >&2; exit 1; fi ;;
+    esac
+done
+case "$MODE" in auto|review|security|log|none) ;; *) echo "Error: invalid mode: $MODE" >&2; exit 1 ;; esac
 
 emit_section() {
     local title="$1"; shift
@@ -45,14 +53,14 @@ matches_substr() {
 DID_ANY=0
 DID_DIFF=0
 
-if matches_word "$ARGS" 'review|diff' || matches_substr "$ARGS" 'レビュー'; then
+if [[ "$MODE" == review ]] || { [[ "$MODE" == auto ]] && { matches_word "$ARGS" 'review|diff' || matches_substr "$ARGS" 'レビュー'; }; }; then
     emit_section "git diff (working tree)" git diff
     emit_section "git diff --staged" git diff --staged
     DID_ANY=1
     DID_DIFF=1
 fi
 
-if matches_word "$ARGS" 'security|audit' || matches_substr "$ARGS" 'セキュリティ|監査'; then
+if [[ "$MODE" == security ]] || { [[ "$MODE" == auto ]] && { matches_word "$ARGS" 'security|audit' || matches_substr "$ARGS" 'セキュリティ|監査'; }; }; then
     if [[ $DID_DIFF -eq 0 ]]; then
         emit_section "git diff (working tree)" git diff
         emit_section "git diff --staged" git diff --staged
@@ -60,24 +68,28 @@ if matches_word "$ARGS" 'security|audit' || matches_substr "$ARGS" 'セキュリ
     fi
     emit_section "Changed files (working tree)" git diff --name-only
     emit_section "Changed files (staged)" git diff --staged --name-only
+    emit_section "Untracked files" git ls-files --others --exclude-standard
     DID_ANY=1
 fi
 
-if matches_word "$ARGS" 'log|history' || matches_substr "$ARGS" '履歴'; then
+if [[ "$MODE" == log ]] || { [[ "$MODE" == auto ]] && { matches_word "$ARGS" 'log|history' || matches_substr "$ARGS" '履歴'; }; }; then
     emit_section "git log --oneline -20" git log --oneline -20
     DID_ANY=1
 fi
 
-# File path detection (whitespace-split tokens; spaces in paths are not supported here)
-for tok in $ARGS; do
-    if [[ -f "$tok" ]]; then
-        emit_file "$tok"
-        DID_ANY=1
+# Explicit, repeated --file arguments preserve spaces.
+for path in "${FILES[@]}"; do
+    if [[ ! -f "$path" ]]; then
+        echo "(file not found: $path)" >&2
+        exit 1
     fi
+    emit_file "$path"
+    DID_ANY=1
 done
 
 if [[ $DID_ANY -eq 0 ]]; then
-    echo "(no context keywords or file paths matched in arguments)" >&2
+    echo "(no context selected; use --mode or --file)" >&2
+    exit 3
 fi
 
 exit 0

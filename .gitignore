@@ -9,3 +9,6 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Per-user wrapper config
+scripts/claude-wrapper.conf

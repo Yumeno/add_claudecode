@@ -9,18 +9,20 @@ description: Get a second opinion from Claude Code (Anthropic's `claude` CLI) on
 
 ## 手順
 
-1. **このスキルディレクトリの絶対パスを特定する。** ランタイムが提供する skill のディレクトリ（この `SKILL.md` が置かれている場所）を `$SKILL_DIR` として扱う。`scripts/` はそこに同梱されている。
-   作業ディレクトリ（cwd）が skill ディレクトリと一致する保証はないため、必ず**絶対パス**でスクリプトを呼ぶ。
+1. **ラッパーの絶対パスを特定する。** プロジェクト配置ではリポジトリルートの
+   `scripts/claude-wrapper.*`、ユーザー配置ではCodexは
+   `~/.agents/scripts/claude-wrapper.*`、Geminiは
+   `~/.gemini/scripts/claude-wrapper.*` を使う。
 
 2. **OS を判定し、`$SKILL_DIR/scripts/` 以下のラッパーを呼び出す。** プロンプトは stdin で渡されるためコマンドライン長制限を受けない。
 
    - Linux / macOS / WSL:
      ```bash
-     bash "$SKILL_DIR/scripts/claude-wrapper.sh" --prompt "<ユーザーの質問>"
+     bash "<絶対パス>/claude-wrapper.sh" --prompt "<ユーザーの質問>"
      ```
    - Windows (PowerShell):
      ```powershell
-     powershell -ExecutionPolicy Bypass -NoProfile -File "$SKILL_DIR\scripts\claude-wrapper.ps1" -Prompt "<ユーザーの質問>"
+     powershell -ExecutionPolicy Bypass -NoProfile -File "<絶対パス>\claude-wrapper.ps1" -Prompt "<ユーザーの質問>"
      ```
 
    主なオプション:
@@ -28,7 +30,8 @@ description: Get a second opinion from Claude Code (Anthropic's `claude` CLI) on
    - `--model` / `-Model` — 例: `claude-opus-4-7`、`claude-sonnet-4-6`
    - `--timeout` / `-Timeout` — タイムアウト秒（デフォルト 180）
 
-3. **結果を以下の形式で提示する:**
+3. 出力行が `[CLAUDE_WRAPPER_ERROR]` で始まる場合はClaudeの回答として扱わず、
+   wrapperの失敗として提示する。成功時だけ以下の形式で提示する:
 
    ```
    ## Claude Code のセカンドオピニオン

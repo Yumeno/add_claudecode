@@ -35,19 +35,26 @@ description: Get a second opinion from Claude Code with file content, git diff, 
          Out-File -FilePath $tmpCtx -Encoding UTF8
      ```
 
+   スペースを含むファイルパスは自動抽出に頼らず明示指定する:
+   - PowerShell: `collect-context.ps1 -Mode none -Path "C:\My Project\foo.ts"`
+   - bash: `collect-context.sh --mode none --file "/path/My Project/foo.ts"`
+   review/security/logも `-Mode` / `--mode` で明示できる。
+
    ヘルパーが何も検出しなかった場合 (キーワード/ファイルパスなし)、ユーザーに何のコンテキストを添えたいか確認する、または明示的にファイルパスを聞く。
 
-3. **ラッパーを呼び出す。** プロンプト本文（引数からファイルパスやキーワードを抜いた純粋な質問部分）と `--context-file` を渡す。
+3. **共通ラッパーを呼び出す。** プロジェクト配置ではリポジトリルートの
+   `scripts/claude-wrapper.*`、ユーザー配置ではCodexは `~/.agents/scripts/`、
+   Geminiは `~/.gemini/scripts/` のwrapperを絶対パスで使う。
 
    - bash:
      ```bash
-     bash "$SKILL_DIR/scripts/claude-wrapper.sh" \
+     bash "<絶対パス>/claude-wrapper.sh" \
          --prompt "<質問本文>" \
          --context-file "$TMPCTX"
      ```
    - PowerShell:
      ```powershell
-     powershell -ExecutionPolicy Bypass -NoProfile -File "$SKILL_DIR\scripts\claude-wrapper.ps1" `
+     powershell -ExecutionPolicy Bypass -NoProfile -File "<絶対パス>\claude-wrapper.ps1" `
          -Prompt "<質問本文>" -ContextFile $tmpCtx
      ```
 
@@ -59,7 +66,8 @@ description: Get a second opinion from Claude Code with file content, git diff, 
    Remove-Item $tmpCtx -Force -ErrorAction SilentlyContinue
    ```
 
-5. **結果を以下の形式で提示する:**
+5. 出力行が `[CLAUDE_WRAPPER_ERROR]` で始まる場合はClaudeの回答として扱わず、
+   wrapperの失敗として提示する。成功時だけ以下の形式で提示する:
 
    ```
    ## Claude Code のセカンドオピニオン（コンテキスト付き）
@@ -79,7 +87,7 @@ description: Get a second opinion from Claude Code with file content, git diff, 
 
 - コンテキストはすべて Anthropic に送信される。秘匿情報（資格情報、個人情報、未公開コード）が含まれていないか送信前に確認する。
 - 100KB 相当の文字数を超えると警告が出る。大きすぎる場合は関連部分のみ抜粋する。
-- ヘルパーのファイルパス検出は空白で分割するため、**スペースを含むパス（例: `C:\My Project\foo.ts`）は認識されない**。スペース入りパスは引数ではなく、明示的にファイル内容を Read して `--context` で渡すか、パスをエスケープせず短いパスに置く。
+- スペースを含むパスは `-Path` / `--file` で明示する。互換用の引数全文からの自動検出は空白区切りのため、明示指定を優先する。
 
 ## 前提条件
 

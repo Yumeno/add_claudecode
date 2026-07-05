@@ -1,4 +1,4 @@
-# collect-context.ps1 — Emit context (git diff / log / files) to stdout
+﻿# collect-context.ps1 — Emit context (git diff / log / files) to stdout
 # Usage: powershell -File collect-context.ps1 "<user arguments>"
 #
 # Recognizes (case-insensitive):
@@ -8,8 +8,11 @@
 # Tokens that resolve to existing files → that file's contents
 
 param(
-    [Parameter(Mandatory=$true, Position=0)]
-    [string]$ArgString
+    [Parameter(Position=0)]
+    [string]$ArgString = "",
+    [ValidateSet("auto", "review", "security", "log", "none")]
+    [string]$Mode = "auto",
+    [string[]]$Path = @()
 )
 
 function Emit-Section {
@@ -46,14 +49,18 @@ function Emit-File {
 $didAny = $false
 $didDiff = $false
 
-if ($ArgString -imatch '\b(review|diff)\b' -or $ArgString -match 'レビュー') {
+$wantReview = $Mode -eq "review" -or ($Mode -eq "auto" -and ($ArgString -imatch '\b(review|diff)\b' -or $ArgString -match 'レビュー'))
+$wantSecurity = $Mode -eq "security" -or ($Mode -eq "auto" -and ($ArgString -imatch '\b(security|audit)\b' -or $ArgString -match 'セキュリティ|監査'))
+$wantLog = $Mode -eq "log" -or ($Mode -eq "auto" -and ($ArgString -imatch '\b(log|history)\b' -or $ArgString -match '履歴'))
+
+if ($wantReview) {
     Emit-Section "git diff (working tree)" { git diff }
     Emit-Section "git diff --staged" { git diff --staged }
     $didAny = $true
     $didDiff = $true
 }
 
-if ($ArgString -imatch '\b(security|audit)\b' -or $ArgString -match 'セキュリティ|監査') {
+if ($wantSecurity) {
     if (-not $didDiff) {
         Emit-Section "git diff (working tree)" { git diff }
         Emit-Section "git diff --staged" { git diff --staged }
@@ -61,24 +68,38 @@ if ($ArgString -imatch '\b(security|audit)\b' -or $ArgString -match 'セキュ�
     }
     Emit-Section "Changed files (working tree)" { git diff --name-only }
     Emit-Section "Changed files (staged)" { git diff --staged --name-only }
+    Emit-Section "Untracked files" { git ls-files --others --exclude-standard }
     $didAny = $true
 }
 
-if ($ArgString -imatch '\b(log|history)\b' -or $ArgString -match '履歴') {
+if ($wantLog) {
     Emit-Section "git log --oneline -20" { git log --oneline -20 }
     $didAny = $true
 }
 
-# File path detection (whitespace-split tokens; spaces in paths are not supported here)
-foreach ($tok in ($ArgString -split '\s+')) {
-    if ($tok -and (Test-Path -LiteralPath $tok -PathType Leaf)) {
-        Emit-File $tok
-        $didAny = $true
+# Explicit paths are the reliable interface and support spaces.
+foreach ($filePath in $Path) {
+    if (-not (Test-Path -LiteralPath $filePath -PathType Leaf)) {
+        [Console]::Error.WriteLine("(file not found: $filePath)")
+        exit 1
+    }
+    Emit-File $filePath
+    $didAny = $true
+}
+
+# Keep best-effort token detection for backward compatibility.
+if ($Mode -eq "auto") {
+    foreach ($tok in ($ArgString -split '\s+')) {
+        if ($tok -and (Test-Path -LiteralPath $tok -PathType Leaf)) {
+            Emit-File $tok
+            $didAny = $true
+        }
     }
 }
 
 if (-not $didAny) {
-    [Console]::Error.WriteLine("(no context keywords or file paths matched in arguments)")
+    [Console]::Error.WriteLine("(no context selected; use -Mode or -Path)")
+    exit 3
 }
 
 exit 0
