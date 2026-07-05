@@ -56,6 +56,46 @@ Test-Case "success preserves stdin argv and cwd" {
     if ((Get-Content -LiteralPath $env:FAKE_CWD -Raw -Encoding UTF8) -ne $WorkDir) { throw "cwd mismatch" }
 }
 
+Test-Case "ordered media are staged by magic bytes and cleaned" {
+    $png = Join-Path $TempRoot "first image.bin"
+    $pdf = Join-Path $TempRoot "second document.dat"
+    [IO.File]::WriteAllBytes($png, [byte[]](0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a))
+    [IO.File]::WriteAllBytes($pdf, [Text.Encoding]::ASCII.GetBytes("%PDF-1.4`n"))
+    $list = Join-Path $TempRoot "attachments.txt"
+    [IO.File]::WriteAllLines($list, [string[]]@($png, $pdf), (New-Object Text.UTF8Encoding($false)))
+    $env:FAKE_MODE = "success"
+    $r = Invoke-Wrapper @("-Prompt", "inspect", "-AttachmentList", $list)
+    if ($r.Code -ne 0) { throw $r.Output }
+    $stdin = Get-Content -LiteralPath $env:FAKE_STDIN -Raw -Encoding UTF8
+    if ($stdin -notmatch '1\..*mime=image/png.*support=probe-verified') { throw $stdin }
+    if ($stdin -notmatch '2\..*mime=application/pdf.*support=experimental') { throw $stdin }
+    $arguments = Get-Content -LiteralPath $env:FAKE_ARGS -Encoding UTF8
+    $addDirIndex = [Array]::IndexOf([object[]]$arguments, "--add-dir")
+    if ($arguments -notcontains "Read" -or $addDirIndex -lt 0) { throw "media argv mismatch: $arguments" }
+    if (Test-Path -LiteralPath $arguments[$addDirIndex + 1]) { throw "media staging directory leaked" }
+}
+
+Test-Case "media rejects explicit workdir" {
+    $png = Join-Path $TempRoot "isolated.png"
+    [IO.File]::WriteAllBytes($png, [byte[]](0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a))
+    $r = Invoke-Wrapper @("-Prompt", "inspect", "-WorkDir", $WorkDir, "-Attachment", $png)
+    if ($r.Code -eq 0 -or $r.Output -notmatch "cannot be combined") { throw $r.Output }
+}
+
+Test-Case "unsupported media is rejected and staging is cleaned" {
+    $mediaTemp = Join-Path $TempRoot "media-temp"
+    New-Item -ItemType Directory -Path $mediaTemp | Out-Null
+    $bad = Join-Path $TempRoot "audio.wav"
+    [IO.File]::WriteAllBytes($bad, [Text.Encoding]::ASCII.GetBytes("RIFFxxxxWAVE"))
+    $oldTemp = $env:TEMP
+    try {
+        $env:TEMP = $mediaTemp
+        $r = Invoke-Wrapper @("-Prompt", "inspect", "-Attachment", $bad)
+    } finally { $env:TEMP = $oldTemp }
+    if ($r.Code -eq 0 -or $r.Output -notmatch "Unsupported media format for Claude Code Read") { throw $r.Output }
+    if (Get-ChildItem -LiteralPath $mediaTemp -Force) { throw "temporary media directory leaked" }
+}
+
 Test-Case "child exit code and stderr are preserved" {
     $env:FAKE_MODE = "fail"
     $r = Invoke-Wrapper @("-Prompt", "x")

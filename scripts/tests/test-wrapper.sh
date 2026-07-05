@@ -42,6 +42,29 @@ FAKE_MODE=success check_success 'success path' bash "$WRAPPER" --prompt 'request
 [[ $(cat "$FAKE_STDIN") == $'## Context\n\ncontext text\n\n---\n\n## Request\n\nrequest text' ]] || { printf 'FAIL stdin contract\n'; failed=$((failed+1)); }
 grep -Fx -- '--tools' "$FAKE_ARGS" >/dev/null && grep -Fx -- 'claude-test' "$FAKE_ARGS" >/dev/null || { printf 'FAIL argv contract\n'; failed=$((failed+1)); }
 [[ $(cat "$FAKE_CWD") == "$TMP_ROOT/work" ]] || { printf 'FAIL cwd contract\n'; failed=$((failed+1)); }
+printf '\211PNG\r\n\032\n' >"$TMP_ROOT/first image.bin"
+printf '%%PDF-1.4\n' >"$TMP_ROOT/second-document.dat"
+FAKE_MODE=success check_success 'ordered media staging' bash "$WRAPPER" --prompt inspect \
+  --attachment "$TMP_ROOT/first image.bin" --attachment "$TMP_ROOT/second-document.dat"
+grep -Eq '1\..*mime=image/png.*support=probe-verified' "$FAKE_STDIN" &&
+  grep -Eq '2\..*mime=application/pdf.*support=experimental' "$FAKE_STDIN" ||
+  { printf 'FAIL media prompt contract\n'; failed=$((failed+1)); }
+media_dir=$(awk 'previous == "--add-dir" { print; exit } { previous=$0 }' "$FAKE_ARGS")
+grep -Fx Read "$FAKE_ARGS" >/dev/null && [[ -n "$media_dir" && ! -e "$media_dir" ]] ||
+  { printf 'FAIL media argv or cleanup contract\n'; failed=$((failed+1)); }
+printf '\357\273\277%s\r\n%s\r\n' "$TMP_ROOT/first image.bin" "$TMP_ROOT/second-document.dat" >"$TMP_ROOT/attachments-crlf.txt"
+FAKE_MODE=success check_success 'BOM CRLF attachment list' bash "$WRAPPER" --prompt inspect \
+  --attachment-list "$TMP_ROOT/attachments-crlf.txt"
+grep -Eq '1\..*mime=image/png' "$FAKE_STDIN" && grep -Eq '2\..*mime=application/pdf' "$FAKE_STDIN" ||
+  { printf 'FAIL attachment-list contract\n'; failed=$((failed+1)); }
+mkdir -p "$TMP_ROOT/media-tmp"
+printf 'RIFFxxxxWAVE' >"$TMP_ROOT/audio.wav"
+TMPDIR="$TMP_ROOT/media-tmp" check_failure 'unsupported media cleanup' 'Unsupported or unrecognized media format' \
+  bash "$WRAPPER" --prompt inspect --attachment "$TMP_ROOT/audio.wav"
+[[ -z "$(find "$TMP_ROOT/media-tmp" -mindepth 1 -print -quit)" ]] ||
+  { printf 'FAIL invalid media cleanup\n'; failed=$((failed+1)); }
+check_failure 'media rejects explicit workdir' 'cannot be combined' \
+  bash "$WRAPPER" --prompt inspect --workdir "$TMP_ROOT/work" --attachment "$TMP_ROOT/first image.bin"
 FAKE_MODE=fail check_failure 'child exit code and stderr' 'fake failure' bash "$WRAPPER" --prompt x
 FAKE_MODE=empty check_failure 'empty output' 'empty output' bash "$WRAPPER" --prompt x
 FAKE_MODE=sleep check_failure 'timeout' 'timed out' bash "$WRAPPER" --prompt x --timeout 1

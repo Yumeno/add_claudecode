@@ -5,7 +5,8 @@ description: Get a second opinion from Claude Code with file content, git diff, 
 
 # ask-claude-with-context — コンテキスト付きで Claude Code にセカンドオピニオンを求める
 
-ファイル内容や `git diff` などを添えて Claude Code に質問・レビュー・監査を依頼します。
+ファイル内容や `git diff`、画像・PDFを添えて Claude Code に
+質問・レビュー・監査を依頼します。添付は複数指定できます。
 
 ## キーワードと収集されるコンテキスト
 
@@ -50,13 +51,26 @@ description: Get a second opinion from Claude Code with file content, git diff, 
      ```bash
      bash "<絶対パス>/claude-wrapper.sh" \
          --prompt "<質問本文>" \
-         --context-file "$TMPCTX"
+         --context-file "$TMPCTX" \
+         --attachment "/absolute/path/image-1.png" \
+         --attachment "/absolute/path/document.pdf"
      ```
    - PowerShell:
      ```powershell
-     powershell -ExecutionPolicy Bypass -NoProfile -File "<絶対パス>\claude-wrapper.ps1" `
-         -Prompt "<質問本文>" -ContextFile $tmpCtx
+      powershell -ExecutionPolicy Bypass -NoProfile -File "<絶対パス>\claude-wrapper.ps1" `
+         -Prompt "<質問本文>" -ContextFile $tmpCtx `
+         -AttachmentList "C:\absolute\attachments.txt"
      ```
+
+   添付がない場合はattachmentオプションを省略する。複数指定は、bashでは
+   `--attachment`を繰り返す。PowerShellで複数指定する場合は、改行区切りの絶対パスを
+   格納したUTF-8テキストファイルを`-AttachmentList`で指定する。bashでも同じ形式を
+   `--attachment-list`で指定できる。PowerShellの`-Attachment`は単一media用とする。
+
+   wrapperは添付ファイルを隔離された一時ディレクトリへコピーし、その
+   ディレクトリだけをClaude Codeへ明示的に公開する。元ファイルの親ディレクトリを
+   公開せず、添付時だけClaude Codeの`Read` toolを有効にする。質問本文には
+   staging後のファイル名が自動的に追記されるため、呼び出し側でパスを埋め込まない。
 
 4. **一時ファイルを削除する:**
    ```bash
@@ -86,6 +100,14 @@ description: Get a second opinion from Claude Code with file content, git diff, 
 ## 注意
 
 - コンテキストはすべて Anthropic に送信される。秘匿情報（資格情報、個人情報、未公開コード）が含まれていないか送信前に確認する。
+- 添付した画像・PDFの内容もAnthropicへ送信される。ユーザーが明示していない
+  ファイルを推測で追加せず、送信対象のファイル一覧を回答に明記する。
+- 添付は通常のテキストコンテキストへBase64変換して埋め込まず、必ずwrapperの
+  attachmentオプションを使う。
+- 初期対応はClaude Codeの`Read` toolが対応する画像とPDFに限定する。音声・動画は
+  対応外であり、別形式として偽装したり無断変換して再送したりしない。
+- wrapperはMIME、ファイル数、合計byte数、サポート状態を送信前に表示する。正常な
+  大容量入力を黙って切り捨てず、過大と判断した場合は実行前にユーザーへ確認する。
 - 100KB 相当の文字数を超えると警告が出る。大きすぎる場合は関連部分のみ抜粋する。
 - スペースを含むパスは `-Path` / `--file` で明示する。互換用の引数全文からの自動検出は空白区切りのため、明示指定を優先する。
 
