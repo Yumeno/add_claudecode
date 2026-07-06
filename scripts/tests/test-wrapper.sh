@@ -69,5 +69,11 @@ FAKE_MODE=fail check_failure 'child exit code and stderr' 'fake failure' bash "$
 FAKE_MODE=empty check_failure 'empty output' 'empty output' bash "$WRAPPER" --prompt x
 FAKE_MODE=sleep check_failure 'timeout' 'timed out' bash "$WRAPPER" --prompt x --timeout 1
 
+printf 'テスト_質問' > "$TMP_ROOT/prompt.txt"
+FAKE_MODE=success check_success 'PromptFile reads UTF-8 and forwards' bash "$WRAPPER" --prompt-file "$TMP_ROOT/prompt.txt" --workdir "$TMP_ROOT/work"
+grep -Fq 'テスト_質問' "$FAKE_STDIN" || { printf 'FAIL PromptFile stdin contract\n'; failed=$((failed+1)); }
+check_failure 'Prompt and PromptFile are mutually exclusive' 'mutually exclusive' bash "$WRAPPER" --prompt x --prompt-file "$TMP_ROOT/prompt.txt"
+check_failure 'Missing PromptFile is rejected' 'Prompt file not found' bash "$WRAPPER" --prompt-file "$TMP_ROOT/missing.txt"
+
 printf 'Passed: %d; Failed: %d\n' "$passed" "$failed"
 (( failed == 0 ))

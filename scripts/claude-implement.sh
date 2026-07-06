@@ -1,19 +1,30 @@
 #!/usr/bin/env bash
 set -uo pipefail
 SENTINEL='[CLAUDE_IMPLEMENT_ERROR]'
-SPEC='' REPO='' MODEL='' TIMEOUT=600 MAX_BUDGET_USD=1.00
+SPEC='' REPO='' REPO_FILE='' MODEL='' TIMEOUT=600 MAX_BUDGET_USD=1.00
+ALLOWS=()
 fail(){ printf '%s %s\n' "$SENTINEL" "$2"; printf 'Error: %s\n' "$2" >&2; exit "$1"; }
 need(){ [[ $# -ge 2 && -n "${2-}" ]] || fail 1 "$1 requires a value."; }
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --spec-file) need "$1" "${2-}"; SPEC=$2; shift 2 ;;
     --repo) need "$1" "${2-}"; REPO=$2; shift 2 ;;
+    --repo-file) need "$1" "${2-}"; REPO_FILE=$2; shift 2 ;;
     --model) need "$1" "${2-}"; MODEL=$2; shift 2 ;;
     --timeout) need "$1" "${2-}"; TIMEOUT=$2; shift 2 ;;
     --max-budget-usd) need "$1" "${2-}"; MAX_BUDGET_USD=$2; shift 2 ;;
+    --allow) need "$1" "${2-}"; ALLOWS+=("$2"); shift 2 ;;
     *) fail 1 "Unknown option: $1" ;;
   esac
 done
+if [[ -n "$REPO" && -n "$REPO_FILE" ]]; then fail 1 "--repo and --repo-file are mutually exclusive."; fi
+if [[ -z "$REPO" && -z "$REPO_FILE" ]]; then fail 1 "--repo or --repo-file is required."; fi
+if [[ -n "$REPO_FILE" ]]; then
+  [[ -f "$REPO_FILE" ]] || fail 1 "--repo-file not found: $REPO_FILE"
+  REPO=$(<"$REPO_FILE")
+  while [[ ${REPO} == *[$' \t\r\n'] ]]; do REPO=${REPO:0:-1}; done
+  [[ -n "$REPO" ]] || fail 1 "--repo-file contents are empty."
+fi
 [[ -f "$SPEC" ]] || fail 1 "Spec file not found: $SPEC"
 [[ -d "$REPO" ]] || fail 1 "Repository not found: $REPO"
 [[ "$TIMEOUT" =~ ^[1-9][0-9]*$ ]] || fail 1 'timeout must be a positive integer'
@@ -50,7 +61,9 @@ elif command -v gtimeout >/dev/null 2>&1; then TIMER=(gtimeout --foreground "${T
 else fail 1 "timeout/gtimeout is required"; fi
 CODE=0
 OUTPUT=$(cd "$REPO" && { printf '%s' "$SAFETY"; cat "$SPEC"; } | "${TIMER[@]}" claude "${ARGS[@]}" 2>"$ERR") || CODE=$?
-bash "$VERIFY" check --repo "$REPO" --snapshot "$SNAPSHOT" || fail 1 'post-execution verification failed'
+VERIFY_ARGS=(check --repo "$REPO" --snapshot "$SNAPSHOT")
+for allow in "${ALLOWS[@]}"; do VERIFY_ARGS+=(--allow "$allow"); done
+bash "$VERIFY" "${VERIFY_ARGS[@]}" || fail 1 'post-execution verification failed'
 [[ $CODE -ne 124 && $CODE -ne 137 ]] || fail 2 "Claude Code timed out after ${TIMEOUT}s"
 [[ $CODE -eq 0 ]] || fail "$CODE" "Claude Code exited $CODE: $(cat "$ERR")"
 [[ -n "${OUTPUT//[[:space:]]/}" ]] || fail 1 'Claude Code returned empty output.'

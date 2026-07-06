@@ -8,4 +8,5 @@ case "${FAKE_MODE:-success}" in
   empty) : ;;
   fail) printf 'fake failure\n' >&2; exit 7 ;;
   sleep) sleep 5 ;;
+  edit-env-example) printf changed > .env.example; printf 'fake response\n' ;;
 esac

@@ -121,6 +121,28 @@ Test-Case "PowerShell source is UTF-8 BOM" {
     }
 }
 
+Test-Case "PromptFile reads UTF-8 content and forwards to stdin" {
+    $env:FAKE_MODE = "success"
+    $promptFile = Join-Path $TempRoot "prompt.txt"
+    [IO.File]::WriteAllText($promptFile, "テスト_質問", (New-Object Text.UTF8Encoding($false)))
+    $r = Invoke-Wrapper @("-PromptFile", $promptFile, "-WorkDir", $WorkDir)
+    if ($r.Code -ne 0) { throw $r.Output }
+    $stdin = Get-Content -LiteralPath $env:FAKE_STDIN -Raw -Encoding UTF8
+    if ($stdin -ne "テスト_質問") { throw "stdin mismatch: [$stdin]" }
+}
+
+Test-Case "Prompt and PromptFile are mutually exclusive" {
+    $promptFile = Join-Path $TempRoot "prompt2.txt"
+    [IO.File]::WriteAllText($promptFile, "x", (New-Object Text.UTF8Encoding($false)))
+    $r = Invoke-Wrapper @("-Prompt", "y", "-PromptFile", $promptFile)
+    if ($r.Code -eq 0 -or $r.Output -notmatch "mutually exclusive") { throw $r.Output }
+}
+
+Test-Case "Missing PromptFile is rejected" {
+    $r = Invoke-Wrapper @("-PromptFile", (Join-Path $TempRoot "missing.txt"))
+    if ($r.Code -eq 0 -or $r.Output -notmatch "Prompt file not found") { throw $r.Output }
+}
+
 Write-Host "Passed: $passed; Failed: $failed"
 Remove-Item -LiteralPath $TempRoot -Recurse -Force -ErrorAction SilentlyContinue
 if ($failed -gt 0) { exit 1 }

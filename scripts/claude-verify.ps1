@@ -2,18 +2,45 @@
     [Parameter(Position = 0, Mandatory = $true)]
     [ValidateSet("snapshot", "check")]
     [string]$Command,
-    [Parameter(Mandatory = $true)]
-    [string]$Repo,
+    [string]$Repo = "",
+    [string]$RepoFile = "",
     [Parameter(Mandatory = $true)]
     [string]$Snapshot,
     [string[]]$Allow = @()
 )
 
 $ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+$OutputEncoding = [Console]::OutputEncoding
 
 function Fail([string]$Message) {
     Write-Output "[CLAUDE_VERIFY_ERROR] $Message"
     exit 2
+}
+
+if ([string]::IsNullOrEmpty($Repo) -and [string]::IsNullOrEmpty($RepoFile)) {
+    Fail "Either -Repo or -RepoFile is required"
+}
+if (-not [string]::IsNullOrEmpty($Repo) -and -not [string]::IsNullOrEmpty($RepoFile)) {
+    Fail "-Repo and -RepoFile are mutually exclusive"
+}
+if (-not [string]::IsNullOrEmpty($RepoFile)) {
+    if (-not (Test-Path -LiteralPath $RepoFile -PathType Leaf)) {
+        Fail "RepoFile not found: $RepoFile"
+    }
+    $utf8Strict = New-Object System.Text.UTF8Encoding($false, $true)
+    try {
+        $Repo = [IO.File]::ReadAllText($RepoFile, $utf8Strict)
+    } catch {
+        Fail "RepoFile is not valid UTF-8"
+    }
+    $Repo = $Repo.TrimEnd([char[]]"`r`n")
+    if ([string]::IsNullOrWhiteSpace($Repo)) {
+        Fail "RepoFile contents are empty"
+    }
+    if (-not (Test-Path -LiteralPath $Repo -PathType Container)) {
+        Fail "Repository path read from RepoFile does not exist"
+    }
 }
 
 function Invoke-Git([string[]]$Arguments, [switch]$AllowFailure) {
@@ -47,11 +74,58 @@ function Is-Protected([string]$Path) {
 function File-State([string]$Path) {
     $item = Get-Item -LiteralPath $Path -Force
     $kind = "file"
-    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { $kind = "reparse" }
-    $hash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
     $target = $null
-    if ($kind -eq "reparse") { $target = [string]$item.Target }
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        $kind = "reparse"
+        $target = [string]@($item.Target)[0]
+    }
+    if ($kind -eq "reparse") {
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try {
+            $bytes = [Text.Encoding]::UTF8.GetBytes([string]$target)
+            $hash = ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace("-", "").ToLowerInvariant()
+        } finally { $sha.Dispose() }
+    } else {
+        $hash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
     return [ordered]@{ kind = $kind; target = $target; sha256 = $hash }
+}
+
+function Assert-SnapshotSafe {
+    if (Test-Path -LiteralPath (Join-Path $script:RepoRoot ".gitmodules")) {
+        Fail "repository contains submodules; not supported by claude-verify"
+    }
+    $modules = Invoke-Git @("rev-parse", "--path-format=absolute", "--git-path", "modules")
+    if ((Test-Path -LiteralPath $modules -PathType Container) -and
+        @(Get-ChildItem -LiteralPath $modules -Force -Directory -ErrorAction Stop).Count -gt 0) {
+        Fail "repository contains submodules; not supported by claude-verify"
+    }
+
+    $rootPrefix = $script:RepoRoot + [IO.Path]::DirectorySeparatorChar
+    $items = @(Get-ChildItem -LiteralPath $script:RepoRoot -Recurse -Force -ErrorAction Stop |
+        Where-Object {
+            $_.FullName -notlike "$($script:RepoRoot)\.git\*" -and
+            ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
+        })
+    foreach ($item in $items) {
+        $rel = Relative-Path $item.FullName
+        $targetValue = @($item.Target)[0]
+        if ([string]::IsNullOrWhiteSpace([string]$targetValue)) {
+            Fail "cannot resolve symlink target: $rel"
+        }
+        if ([IO.Path]::IsPathRooted([string]$targetValue)) {
+            $candidate = [IO.Path]::GetFullPath([string]$targetValue)
+        } else {
+            $candidate = [IO.Path]::GetFullPath((Join-Path $item.DirectoryName ([string]$targetValue)))
+        }
+        if (Test-Path -LiteralPath $candidate) {
+            $candidate = (Resolve-Path -LiteralPath $candidate).Path
+        }
+        if ($candidate -ine $script:RepoRoot -and
+            -not $candidate.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+            Fail "symlink escapes repository: $rel -> $candidate"
+        }
+    }
 }
 
 function Protected-State {
@@ -66,7 +140,8 @@ function Protected-State {
     if (Test-Path -LiteralPath $gitConfig -PathType Leaf) { $state[".git/config"] = File-State $gitConfig }
     $hooks = Invoke-Git @("rev-parse", "--path-format=absolute", "--git-path", "hooks")
     if (Test-Path -LiteralPath $hooks -PathType Container) {
-        foreach ($item in (Get-ChildItem -LiteralPath $hooks -Recurse -Force -File)) {
+        foreach ($item in (Get-ChildItem -LiteralPath $hooks -Recurse -Force |
+            Where-Object { -not $_.PSIsContainer })) {
             $hookRel = $item.FullName.Substring($hooks.Length).TrimStart("\", "/").Replace("\", "/")
             $state[".git/hooks/$hookRel"] = File-State $item.FullName
         }
@@ -105,6 +180,7 @@ try {
         if ($Allow.Count -gt 0) { Fail "Allow is valid only with check" }
         $parent = Split-Path -Parent $snapshotFull
         if (-not (Test-Path -LiteralPath $parent -PathType Container)) { Fail "Snapshot directory does not exist" }
+        Assert-SnapshotSafe
         Current-State | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $snapshotFull -Encoding UTF8
         Write-Output "[CLAUDE_VERIFY_OK] snapshot created"
         exit 0

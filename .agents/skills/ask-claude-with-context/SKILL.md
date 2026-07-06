@@ -67,6 +67,16 @@ description: Get a second opinion from Claude Code with file content, git diff, 
    格納したUTF-8テキストファイルを`-AttachmentList`で指定する。bashでも同じ形式を
    `--attachment-list`で指定できる。PowerShellの`-Attachment`は単一media用とする。
 
+   質問本文に日本語などの非ASCII文字を含む場合、Windowsで `powershell -File`
+   のCLI argv境界がCP932でmanglingする可能性がある。回避策として `-Prompt` の代わりに
+   `-PromptFile` / `--prompt-file` にUTF-8で質問文を書いた一時ファイル(ASCII名)を渡す:
+   ```powershell
+   $tmpPrompt = Join-Path $env:TEMP ("claude_prompt_{0}.txt" -f (Get-Random))
+   [IO.File]::WriteAllText($tmpPrompt, "<質問本文>", (New-Object Text.UTF8Encoding($false)))
+   powershell -ExecutionPolicy Bypass -NoProfile -File "<絶対パス>\claude-wrapper.ps1" `
+       -PromptFile $tmpPrompt -ContextFile $tmpCtx
+   ```
+
    wrapperは添付ファイルを隔離された一時ディレクトリへコピーし、その
    ディレクトリだけをClaude Codeへ明示的に公開する。元ファイルの親ディレクトリを
    公開せず、添付時だけClaude Codeの`Read` toolを有効にする。質問本文には

@@ -1,6 +1,7 @@
 ﻿# claude-wrapper.ps1 - Claude Code CLI non-interactive wrapper (PowerShell 5.1+)
 param(
     [string]$Prompt = "",
+    [string]$PromptFile = "",
     [string]$Model = "",
     [int]$Timeout = 180,
     [decimal]$MaxBudgetUsd = 0.25,
@@ -175,7 +176,16 @@ if ($ShowModel) {
     exit 0
 }
 
-if ([string]::IsNullOrWhiteSpace($Prompt)) { Fail 1 "-Prompt is required." }
+if (-not [string]::IsNullOrWhiteSpace($Prompt) -and -not [string]::IsNullOrWhiteSpace($PromptFile)) {
+    Fail 1 "-Prompt and -PromptFile are mutually exclusive."
+}
+if (-not [string]::IsNullOrWhiteSpace($PromptFile)) {
+    if (-not (Test-Path -LiteralPath $PromptFile -PathType Leaf)) {
+        Fail 1 "Prompt file not found: $PromptFile"
+    }
+    $Prompt = [IO.File]::ReadAllText($PromptFile, [Text.Encoding]::UTF8)
+}
+if ([string]::IsNullOrWhiteSpace($Prompt)) { Fail 1 "-Prompt (or -PromptFile) is required." }
 if ($Timeout -le 0) { Fail 1 "-Timeout must be greater than zero." }
 if ($MaxBudgetUsd -le 0) { Fail 1 "-MaxBudgetUsd must be greater than zero." }
 if (-not [string]::IsNullOrWhiteSpace($Cd) -and -not [string]::IsNullOrWhiteSpace($WorkDir)) {

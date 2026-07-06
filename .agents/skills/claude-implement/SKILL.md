@@ -25,5 +25,44 @@ description: Claude Codeを実装担当として使い、cleanなGitリポジト
 場合も、仕様ファイルへのBase64埋め込みや一時的なリポジトリ内コピーで回避しない。
 メディアを使ったセカンドオピニオンは`ask-claude-with-context`で別途実行する。
 
-保護対象ファイルの編集が必要な場合、実行前にユーザーの明示承認を得る。承認対象だけを
-verifyのallowへ渡し、過大なglobは使わない。
+保護対象ファイル(`.env` / `.env.*` / `*.pem` / `*.key` / `*.p12` / `*.pfx` /
+`.git/config` / `.git/hooks/*`)の編集が必要な場合、実行前にユーザーの明示承認を得たうえで
+`claude-implement`の`-Allow` / `--allow`にexact pathを渡す。承認対象だけを列挙し、
+`*`のような過大パターンは使わない。`-Allow`はそのまま`claude-verify check`へ委譲される。
+
+- PowerShell: `claude-implement.ps1 -SpecFile ... -Repo ... -Allow ".env.example"`
+  (複数指定はcomma区切りの1引数: `-Allow ".env.example,.env.sample"`。
+  `powershell -File`のCLI境界では配列syntaxが1要素にfoldされるため、内部でcomma
+  splitして正規化する。値自身にcommaを含むパスは非対応)
+- bash: `claude-implement.sh --spec-file ... --repo ... --allow .env.example`
+  (複数指定は`--allow`を繰り返す)
+
+承認対象以外の保護対象が変更された場合は`[CLAUDE_VERIFY_VIOLATION]`として検出される。
+
+以下の条件では`claude-verify`のsnapshotがfail closedで拒否され、`claude-implement`も
+中断する: (a) リポジトリがsubmoduleを含む(`.gitmodules`または`.git/modules/*`の
+存在)、(b) リポジトリ内にリポジトリ外を指すsymlink / reparse pointが存在する。
+
+## 非ASCII path (日本語など) の扱い
+
+Windows で `powershell -File claude-implement.ps1 -Repo <非ASCIIパス>` を
+bash 等の UTF-8 shell 経由で呼ぶと、CLI argv 境界で path が CP932 として
+mangling される。回避策として `-RepoFile <ascii名の一時ファイル>` を使う:
+
+- 呼び出し側は「repo path の絶対パス文字列をUTF-8で書き込んだASCII名の一時ファイル」を作る
+- そのASCIIファイルパスを `-RepoFile` に渡す
+- claude-implement / claude-verify はUTF-8 strict decoderで読み、正しいUnicode文字列として扱う
+
+```powershell
+# 例: PowerShell 版
+"C:\Users\ユーザー\プロジェクト" | Out-File -Encoding utf8NoBOM $env:TEMP\claude-repo.txt
+powershell -File claude-implement.ps1 -SpecFile spec.txt -RepoFile "$env:TEMP\claude-repo.txt"
+```
+
+```bash
+# 例: bash 版
+printf '%s' "/path/to/日本語/repo" > /tmp/claude-repo.txt
+bash claude-implement.sh --spec-file spec.txt --repo-file /tmp/claude-repo.txt
+```
+
+`-Repo` と `-RepoFile` は排他。ASCII パスなら `-Repo` を使えばよい。

@@ -1,10 +1,12 @@
 ﻿# claude-implement.ps1 - Run Claude Code with narrowly scoped file-edit tools.
 param(
     [Parameter(Mandatory=$true)][string]$SpecFile,
-    [Parameter(Mandatory=$true)][string]$Repo,
+    [string]$Repo = "",
+    [string]$RepoFile = "",
     [string]$Model = "",
     [int]$Timeout = 600,
-    [decimal]$MaxBudgetUsd = 1.00
+    [decimal]$MaxBudgetUsd = 1.00,
+    [string[]]$Allow = @()
 )
 
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
@@ -18,10 +20,45 @@ function Fail {
     exit $Code
 }
 
+if ([string]::IsNullOrEmpty($Repo) -and [string]::IsNullOrEmpty($RepoFile)) {
+    Fail 1 "Either -Repo or -RepoFile is required."
+}
+if (-not [string]::IsNullOrEmpty($Repo) -and -not [string]::IsNullOrEmpty($RepoFile)) {
+    Fail 1 "-Repo and -RepoFile are mutually exclusive."
+}
+if (-not [string]::IsNullOrEmpty($RepoFile)) {
+    if (-not (Test-Path -LiteralPath $RepoFile -PathType Leaf)) {
+        Fail 1 "RepoFile not found: $RepoFile"
+    }
+    $utf8Strict = New-Object System.Text.UTF8Encoding($false, $true)
+    try {
+        $Repo = [IO.File]::ReadAllText($RepoFile, $utf8Strict)
+    } catch {
+        Fail 1 "RepoFile is not valid UTF-8."
+    }
+    $Repo = $Repo.TrimEnd([char[]]"`r`n")
+    if ([string]::IsNullOrWhiteSpace($Repo)) {
+        Fail 1 "RepoFile contents are empty."
+    }
+}
 if (-not (Test-Path -LiteralPath $SpecFile -PathType Leaf)) { Fail 1 "Spec file not found: $SpecFile" }
 if (-not (Test-Path -LiteralPath $Repo -PathType Container)) { Fail 1 "Repository not found: $Repo" }
 if ($Timeout -le 0 -or $MaxBudgetUsd -le 0) { Fail 1 "Timeout and budget must be greater than zero." }
 if ($Model -and $Model -notmatch '^[A-Za-z0-9._:/-]+$') { Fail 1 "Model name contains unsafe characters." }
+
+# Normalize -Allow: `powershell -File` binds "a,b" as a single [string[]] element instead
+# of splitting on comma, so external callers (Skill wrappers) can't reliably pass multiple
+# values via the native array syntax. Accept comma-separated tokens inside each element too.
+if ($Allow.Count -gt 0) {
+    $normalized = New-Object Collections.Generic.List[string]
+    foreach ($item in $Allow) {
+        foreach ($piece in ([string]$item).Split(",")) {
+            $trimmed = $piece.Trim()
+            if (-not [string]::IsNullOrEmpty($trimmed)) { [void]$normalized.Add($trimmed) }
+        }
+    }
+    $Allow = $normalized.ToArray()
+}
 
 try {
     & git -C $Repo rev-parse --is-inside-work-tree *> $null
@@ -37,7 +74,7 @@ try {
 $verify = Join-Path $PSScriptRoot "claude-verify.ps1"
 $snapshot = Join-Path $env:TEMP ("claude-verify-" + [guid]::NewGuid().ToString("N") + ".json")
 if (-not (Test-Path -LiteralPath $verify -PathType Leaf)) { Fail 1 "Verification helper not found: $verify" }
-& powershell -ExecutionPolicy Bypass -NoProfile -File $verify snapshot -Repo $Repo -Snapshot $snapshot
+& $verify snapshot -Repo $Repo -Snapshot $snapshot
 if ($LASTEXITCODE -ne 0) { Fail 1 "Could not create pre-execution snapshot." }
 
 $spec = Get-Content -LiteralPath $SpecFile -Raw -Encoding UTF8
@@ -98,7 +135,11 @@ try {
     $stdout = $stdoutTask.Result
     $stderr = $stderrTask.Result
     $claudeExit = $process.ExitCode
-    & powershell -ExecutionPolicy Bypass -NoProfile -File $verify check -Repo $Repo -Snapshot $snapshot
+    if ($Allow.Count -gt 0) {
+        & $verify check -Repo $Repo -Snapshot $snapshot -Allow $Allow
+    } else {
+        & $verify check -Repo $Repo -Snapshot $snapshot
+    }
     $verifyExit = $LASTEXITCODE
     Remove-Item -LiteralPath $snapshot -Force -ErrorAction SilentlyContinue
     if ($verifyExit -ne 0) { Fail $verifyExit "Post-execution verification failed." }

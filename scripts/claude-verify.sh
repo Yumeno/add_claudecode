@@ -3,17 +3,26 @@ set -uo pipefail
 
 fail() { printf '[CLAUDE_VERIFY_ERROR] %s\n' "$1"; exit 2; }
 command_name=${1:-}; shift || true
-repo= snapshot=; allows=()
+repo= repo_file= snapshot=; allows=()
 while (($#)); do
   case "$1" in
     --repo) (($# >= 2)) || fail "missing --repo value"; repo=$2; shift 2 ;;
+    --repo-file) (($# >= 2)) || fail "missing --repo-file value"; repo_file=$2; shift 2 ;;
     --snapshot) (($# >= 2)) || fail "missing --snapshot value"; snapshot=$2; shift 2 ;;
     --allow) (($# >= 2)) || fail "missing --allow value"; allows+=("$2"); shift 2 ;;
     *) fail "unknown option: $1" ;;
   esac
 done
 [[ $command_name == snapshot || $command_name == check ]] || fail "command must be snapshot or check"
-[[ -n $repo && -n $snapshot ]] || fail "--repo and --snapshot are required"
+if [[ -n $repo && -n $repo_file ]]; then fail "--repo and --repo-file are mutually exclusive"; fi
+if [[ -z $repo && -z $repo_file ]]; then fail "--repo or --repo-file is required"; fi
+if [[ -n $repo_file ]]; then
+  [[ -f $repo_file ]] || fail "--repo-file not found: $repo_file"
+  repo=$(<"$repo_file")
+  while [[ ${repo} == *[$' \t\r\n'] ]]; do repo=${repo:0:-1}; done
+  [[ -n $repo ]] || fail "--repo-file contents are empty"
+fi
+[[ -n $snapshot ]] || fail "--snapshot is required"
 repo=$(cd "$repo" 2>/dev/null && pwd -P) || fail "repository not found"
 top=$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null) || fail "not a Git repository"
 top=$(cd "$top" 2>/dev/null && pwd -P) || fail "could not canonicalize repository root"
@@ -29,6 +38,39 @@ is_protected() {
   local n=${p##*/}
   [[ $p == .git/config || $p == .git/hooks/* || $n == .env || $n == .env.* ||
      $n == *.pem || $n == *.key || $n == *.p12 || $n == *.pfx ]]
+}
+
+resolve_link() {
+  local link=$1 resolved
+  if resolved=$(readlink -f -- "$link" 2>/dev/null) && [[ -n $resolved ]]; then
+    printf '%s\n' "$resolved"
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$link"
+  elif command -v python >/dev/null 2>&1; then
+    python -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$link"
+  else
+    return 1
+  fi
+}
+
+assert_snapshot_safe() {
+  local modules p rel target
+  [[ ! -e "$repo/.gitmodules" ]] ||
+    fail "repository contains submodules; not supported by claude-verify"
+  modules=$(git -C "$repo" rev-parse --path-format=absolute --git-path modules 2>/dev/null) ||
+    fail "could not locate submodule metadata"
+  if [[ -d $modules ]] && find "$modules" -mindepth 1 -maxdepth 1 -type d -print -quit | grep -q .; then
+    fail "repository contains submodules; not supported by claude-verify"
+  fi
+  while IFS= read -r -d '' p; do
+    rel=${p#"$repo"/}
+    target=$(resolve_link "$p") ||
+      fail "cannot resolve symlink target: $rel"
+    case "$target" in
+      "$repo"|"$repo"/*) ;;
+      *) fail "symlink escapes repository: $rel -> $target" ;;
+    esac
+  done < <(find "$repo" -path "$repo/.git" -prune -o -type l -print0)
 }
 
 emit_state() {
@@ -58,7 +100,7 @@ emit_state() {
           if [[ -L $p ]]; then kind=symlink; hash=$(printf %s "$(readlink "$p")" | sha256sum | cut -d' ' -f1)
           else hash=$(sha256sum "$p" | cut -d' ' -f1) || return 1; fi
           printf 'protected\t%s\t%s\t%s\n' "$(printf %s "$rel" | base64 | tr -d '\r\n')" "$kind" "$hash"
-        done < <(find "$p" -type f -print0)
+        done < <(find "$p" \( -type f -o -type l \) -print0)
       else
         rel=.git/config; kind=file
         if [[ -L $p ]]; then kind=symlink; hash=$(printf %s "$(readlink "$p")" | sha256sum | cut -d' ' -f1)
@@ -71,6 +113,7 @@ emit_state() {
 
 if [[ $command_name == snapshot ]]; then
   ((${#allows[@]} == 0)) || fail "allow is valid only with check"
+  assert_snapshot_safe
   emit_state "$snapshot" || fail "could not create snapshot"
   printf '[CLAUDE_VERIFY_OK] snapshot created\n'
   exit 0

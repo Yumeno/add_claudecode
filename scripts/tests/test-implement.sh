@@ -23,6 +23,18 @@ bash "$ROOT/claude-implement.sh" --spec-file "$TMP/spec.txt" --repo "$REPO" >/de
 grep -qx -- '--safe-mode' "$FAKE_ARGS"
 grep -qx -- 'dontAsk' "$FAKE_ARGS"
 grep -q 'Mandatory safety constraints' "$FAKE_STDIN"
+printf base > "$REPO/.env.example"
+git -C "$REPO" add .env.example
+git -C "$REPO" commit -qm env-example
+export FAKE_MODE=edit-env-example
+if bash "$ROOT/claude-implement.sh" --spec-file "$TMP/spec.txt" --repo "$REPO" >/dev/null 2>&1; then
+  echo 'protected change was accepted without --allow' >&2
+  exit 1
+fi
+printf base > "$REPO/.env.example"
+bash "$ROOT/claude-implement.sh" --spec-file "$TMP/spec.txt" --repo "$REPO" --allow .env.example >/dev/null
+printf base > "$REPO/.env.example"
+export FAKE_MODE=success
 printf dirty > "$REPO/dirty.txt"
 if bash "$ROOT/claude-implement.sh" --spec-file "$TMP/spec.txt" --repo "$REPO" >/dev/null 2>&1; then
   echo 'dirty tree was accepted' >&2

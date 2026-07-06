@@ -4,7 +4,7 @@ set -uo pipefail
 ERROR_SENTINEL='[CLAUDE_WRAPPER_ERROR]'
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 CONFIG_FILE="$SCRIPT_DIR/claude-wrapper.conf"
-PROMPT='' MODEL='' TIMEOUT=180 MAX_BUDGET_USD=0.25 WORKDIR='' CONTEXT='' CONTEXT_FILE='' ATTACHMENT_LIST=''
+PROMPT='' PROMPT_FILE='' MODEL='' TIMEOUT=180 MAX_BUDGET_USD=0.25 WORKDIR='' CONTEXT='' CONTEXT_FILE='' ATTACHMENT_LIST=''
 SET_MODEL='' SHOW_MODEL=0
 OWNED_WORKDIR=''
 MEDIA_DIR=''
@@ -25,6 +25,7 @@ valid_model() { [[ "$1" =~ ^[A-Za-z0-9._:/-]+$ ]] || fail 1 "unsafe model name f
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --prompt) require_value "$1" "${2-}"; PROMPT=$2; shift 2 ;;
+    --prompt-file) require_value "$1" "${2-}"; PROMPT_FILE=$2; shift 2 ;;
     --model) require_value "$1" "${2-}"; MODEL=$2; shift 2 ;;
     --timeout) require_value "$1" "${2-}"; TIMEOUT=$2; shift 2 ;;
     --max-budget-usd) require_value "$1" "${2-}"; MAX_BUDGET_USD=$2; shift 2 ;;
@@ -61,7 +62,12 @@ if (( SHOW_MODEL )); then
   exit 0
 fi
 
-[[ -n "$PROMPT" ]] || fail 1 '--prompt is required.'
+if [[ -n "$PROMPT" && -n "$PROMPT_FILE" ]]; then fail 1 '--prompt and --prompt-file are mutually exclusive.'; fi
+if [[ -n "$PROMPT_FILE" ]]; then
+  [[ -f "$PROMPT_FILE" ]] || fail 1 "Prompt file not found: $PROMPT_FILE"
+  PROMPT=$(cat -- "$PROMPT_FILE")
+fi
+[[ -n "$PROMPT" ]] || fail 1 '--prompt (or --prompt-file) is required.'
 [[ "$TIMEOUT" =~ ^[1-9][0-9]*$ ]] || fail 1 '--timeout must be a positive integer.'
 [[ "$MAX_BUDGET_USD" =~ ^([0-9]+([.][0-9]*)?|[.][0-9]+)$ ]] &&
   awk -v value="$MAX_BUDGET_USD" 'BEGIN { exit !(value > 0) }' ||
