@@ -9,12 +9,10 @@ description: Get a second opinion from Claude Code (Anthropic's `claude` CLI) on
 
 ## 手順
 
-1. **ラッパーの絶対パスを特定する。** プロジェクト配置ではリポジトリルートの
-   `scripts/claude-wrapper.*`、ユーザー配置ではCodexは
-   `~/.agents/scripts/claude-wrapper.*`、Geminiは
-   `~/.gemini/scripts/claude-wrapper.*` を使う。
+1. **ラッパーの絶対パスを特定する。** このSkillに同梱された
+   `$SKILL_DIR/scripts/claude-wrapper.*` を使う。
 
-2. **OS を判定し、`$SKILL_DIR/scripts/` 以下のラッパーを呼び出す。** プロンプトは stdin で渡されるためコマンドライン長制限を受けない。
+2. **OS を判定し、特定したラッパーを絶対パスで呼び出す。** プロンプトは stdin で渡されるためコマンドライン長制限を受けない。
 
    - Linux / macOS / WSL:
      ```bash

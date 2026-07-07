@@ -38,6 +38,20 @@ check_failure 'missing context file' 'Context file not found' bash "$WRAPPER" --
 check_failure 'invalid timeout' 'positive integer' bash "$WRAPPER" --prompt x --timeout nope
 check_failure 'invalid budget' 'greater than zero' bash "$WRAPPER" --prompt x --max-budget-usd 0
 CLAUDE_WRAPPER_MODEL=env-model check_success 'CLI model overrides environment model' bash "$WRAPPER" --show-model --model cli-model
+mkdir -p "$TMP_ROOT/.agents/skills/probe/scripts"
+cp "$WRAPPER" "$TMP_ROOT/.agents/skills/probe/scripts/claude-wrapper.sh"
+check_success 'bundled skill wrapper writes shared config' bash "$TMP_ROOT/.agents/skills/probe/scripts/claude-wrapper.sh" --set-model shared-model
+[[ -f "$TMP_ROOT/scripts/claude-wrapper.conf" ]] || { printf 'FAIL shared config missing\n'; failed=$((failed+1)); }
+out=$(bash "$TMP_ROOT/.agents/skills/probe/scripts/claude-wrapper.sh" --show-model 2>&1) &&
+  [[ "$out" == *"model=shared-model (source: config)"* ]] ||
+  { printf 'FAIL shared config read -- %s\n' "$out"; failed=$((failed+1)); }
+mkdir -p "$TMP_ROOT/home/.agents/skills/probe/scripts"
+cp "$WRAPPER" "$TMP_ROOT/home/.agents/skills/probe/scripts/claude-wrapper.sh"
+HOME="$TMP_ROOT/home" check_success 'user skill wrapper writes bundle config' bash "$TMP_ROOT/home/.agents/skills/probe/scripts/claude-wrapper.sh" --set-model user-shared-model
+[[ -f "$TMP_ROOT/home/.agents/add_claudecode/claude-wrapper.conf" ]] || { printf 'FAIL bundle config missing\n'; failed=$((failed+1)); }
+out=$(HOME="$TMP_ROOT/home" bash "$TMP_ROOT/home/.agents/skills/probe/scripts/claude-wrapper.sh" --show-model 2>&1) &&
+  [[ "$out" == *"model=user-shared-model (source: config)"* ]] ||
+  { printf 'FAIL bundle config read -- %s\n' "$out"; failed=$((failed+1)); }
 FAKE_MODE=success check_success 'success path' bash "$WRAPPER" --prompt 'request text' --context 'context text' --workdir "$TMP_ROOT/work" --model 'claude-test'
 [[ $(cat "$FAKE_STDIN") == $'## Context\n\ncontext text\n\n---\n\n## Request\n\nrequest text' ]] || { printf 'FAIL stdin contract\n'; failed=$((failed+1)); }
 grep -Fx -- '--tools' "$FAKE_ARGS" >/dev/null && grep -Fx -- 'claude-test' "$FAKE_ARGS" >/dev/null || { printf 'FAIL argv contract\n'; failed=$((failed+1)); }

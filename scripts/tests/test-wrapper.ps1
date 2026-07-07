@@ -45,6 +45,39 @@ Test-Case "CLI model overrides environment model" {
     if ($r.Code -ne 0 -or $r.Output -notmatch "model=cli-model \(source: cli\)") { throw $r.Output }
 }
 
+Test-Case "bundled skill wrapper uses repo-level shared config" {
+    $skillWrapperDir = Join-Path $TempRoot ".agents\skills\probe\scripts"
+    New-Item -ItemType Directory -Path $skillWrapperDir -Force | Out-Null
+    Copy-Item -LiteralPath $Wrapper -Destination $skillWrapperDir -Force
+    $skillWrapper = Join-Path $skillWrapperDir "claude-wrapper.ps1"
+    $r = & powershell -ExecutionPolicy Bypass -NoProfile -File $skillWrapper -SetModel "shared-model" 2>&1
+    if ($LASTEXITCODE -ne 0) { throw ($r | Out-String) }
+    $sharedConfig = Join-Path $TempRoot "scripts\claude-wrapper.conf"
+    if (-not (Test-Path -LiteralPath $sharedConfig -PathType Leaf)) { throw "shared config missing: $sharedConfig" }
+    $r = & powershell -ExecutionPolicy Bypass -NoProfile -File $skillWrapper -ShowModel 2>&1
+    if ($LASTEXITCODE -ne 0 -or (($r | Out-String) -notmatch "model=shared-model \(source: config\)")) { throw ($r | Out-String) }
+}
+
+Test-Case "user-installed skill wrapper uses bundle config" {
+    $homeDir = Join-Path $TempRoot "home"
+    $skillWrapperDir = Join-Path $homeDir ".agents\skills\probe\scripts"
+    New-Item -ItemType Directory -Path $skillWrapperDir -Force | Out-Null
+    Copy-Item -LiteralPath $Wrapper -Destination $skillWrapperDir -Force
+    $skillWrapper = Join-Path $skillWrapperDir "claude-wrapper.ps1"
+    $oldUserProfile = $env:USERPROFILE
+    try {
+        $env:USERPROFILE = $homeDir
+        $r = & powershell -ExecutionPolicy Bypass -NoProfile -File $skillWrapper -SetModel "user-shared-model" 2>&1
+        if ($LASTEXITCODE -ne 0) { throw ($r | Out-String) }
+        $sharedConfig = Join-Path $homeDir ".agents\add_claudecode\claude-wrapper.conf"
+        if (-not (Test-Path -LiteralPath $sharedConfig -PathType Leaf)) { throw "bundle config missing: $sharedConfig" }
+        $r = & powershell -ExecutionPolicy Bypass -NoProfile -File $skillWrapper -ShowModel 2>&1
+        if ($LASTEXITCODE -ne 0 -or (($r | Out-String) -notmatch "model=user-shared-model \(source: config\)")) { throw ($r | Out-String) }
+    } finally {
+        $env:USERPROFILE = $oldUserProfile
+    }
+}
+
 Test-Case "success preserves stdin argv and cwd" {
     $env:FAKE_MODE = "success"
     $r = Invoke-Wrapper @("-Prompt", "request text", "-Context", "context text", "-WorkDir", $WorkDir, "-Model", "claude-test")

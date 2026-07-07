@@ -12,9 +12,8 @@ description: Claude Codeを実装担当として使い、cleanなGitリポジト
 1. 対象がGit working treeで、`git status --porcelain=v1 --untracked-files=all` が空であることを確認する。
 2. `claude-verify` のsnapshotを取得し、出力されたsnapshot pathを記録する。失敗時は中断する。
 3. ユーザーのタスクを仕様ファイルへ保存する。認証情報や不要なファイル内容を含めない。
-4. プロジェクト配置ではリポジトリルートのscripts、ユーザー配置ではCodexは
-   `~/.agents/scripts/`、Geminiは `~/.gemini/scripts/` の
-   `claude-implement.ps1` / `.sh` を絶対パスで呼ぶ。
+4. このSkillに同梱された
+   `$SKILL_DIR/scripts/claude-implement.ps1` / `.sh` を絶対パスで呼ぶ。
 5. `[CLAUDE_IMPLEMENT_ERROR]` が出た場合は失敗として扱う。
 6. 成否にかかわらずsnapshotを使って `claude-verify` のcheckを実行する。
 7. `[CLAUDE_VERIFY_VIOLATION]` を最優先で報告する。

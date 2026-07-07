@@ -43,9 +43,8 @@ description: Get a second opinion from Claude Code with file content, git diff, 
 
    ヘルパーが何も検出しなかった場合 (キーワード/ファイルパスなし)、ユーザーに何のコンテキストを添えたいか確認する、または明示的にファイルパスを聞く。
 
-3. **共通ラッパーを呼び出す。** プロジェクト配置ではリポジトリルートの
-   `scripts/claude-wrapper.*`、ユーザー配置ではCodexは `~/.agents/scripts/`、
-   Geminiは `~/.gemini/scripts/` のwrapperを絶対パスで使う。
+3. **ラッパーを呼び出す。** このSkillに同梱された
+   `$SKILL_DIR/scripts/claude-wrapper.*` を絶対パスで呼ぶ。
 
    - bash:
      ```bash
